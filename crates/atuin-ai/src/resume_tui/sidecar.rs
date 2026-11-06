@@ -424,7 +424,7 @@ mod tests {
         use atuin_common::harnesstools::continuation::marker_text;
 
         let source = source.await;
-        let marker = marker_text(AnyHarness::ClaudeCode(Ccode), "root", None);
+        let marker = marker_text(AnyHarness::ClaudeCode(Ccode::DEFAULT), "root", None);
         let mut prompt = message("continued", None, Role::User, "fix the flaky clock", 4);
         prompt.content.insert(0, Content::Text(marker));
         source.db.append(&prompt).await.unwrap();

@@ -2738,6 +2738,7 @@ fn as_is_plan() -> super::ResumePlan {
         cwd: None,
         cwd_requirement: atuin_common::harnesstools::resume::CwdRequirement::Preferred,
         native_path: None,
+        env: Vec::new(),
     }
 }
 

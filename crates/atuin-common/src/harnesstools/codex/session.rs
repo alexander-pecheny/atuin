@@ -142,7 +142,7 @@ impl Observable for Codex {
     type Sessions = CodexSessions;
 
     fn sessions(&self, pool: BlockingPool) -> CodexSessions {
-        CodexSessions::builder().pool(pool).build()
+        CodexSessions::builder().root(self.root()).pool(pool).build()
     }
 }
 

@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use atuin_client::ai_session::{HarnessKind, Head, SourceId};
+use atuin_client::ai_session::{HarnessKind, Head, Homes, SourceId};
 use atuin_client::settings::{AiSessionResume, Settings};
 use atuin_common::env;
 use atuin_common::harnesstools::continuation::{self, Flattened};
@@ -303,6 +303,12 @@ pub trait Machine: Send + Sync {
     /// [`Harness::locate`]: atuin_common::harnesstools::Harness::locate
     async fn locate(&self, harness: AnyHarness, id: &str) -> Option<PathBuf>;
 
+    /// `harness` at whichever of its homes here holds session `id`: its environment's when none
+    /// does.
+    async fn home_of(&self, harness: AnyHarness, _id: &str) -> AnyHarness {
+        harness
+    }
+
     /// Write `session` out for `harness` ([`Harness::rehydrate`]).
     ///
     /// [`Harness::rehydrate`]: atuin_common::harnesstools::Harness::rehydrate
@@ -387,13 +393,22 @@ fn wrote(started: Instant) {
     *WRITING.lock().get_or_insert_default() += started.elapsed();
 }
 
-/// This machine, as the harnesses themselves see it.
-pub struct ThisMachine;
+/// This machine, as the harnesses themselves see it, with the homes `[[threads.homes]]` adds.
+pub struct ThisMachine(Homes);
 
 #[async_trait]
 impl Machine for ThisMachine {
     async fn locate(&self, harness: AnyHarness, id: &str) -> Option<PathBuf> {
         harness.locate(id).await
+    }
+
+    async fn home_of(&self, harness: AnyHarness, id: &str) -> AnyHarness {
+        for at in self.0.of(HarnessKind::from(&harness)) {
+            if at.locate(id).await.is_some() {
+                return at;
+            }
+        }
+        harness
     }
 
     async fn rehydrate(
@@ -479,7 +494,8 @@ pub fn switched_dir(settings: &Settings) -> PathBuf {
 impl HarnessResumer {
     pub fn new(context: ResumeContext, settings: &Settings) -> Self {
         let templates = settings.threads.resume.clone();
-        Self::on(context, templates, ThisMachine, switched_dir(settings))
+        let machine = ThisMachine(Homes::new(&settings.threads.homes));
+        Self::on(context, templates, machine, switched_dir(settings))
     }
 
     /// A resumer looking at `machine` instead of this one.
@@ -534,6 +550,14 @@ impl HarnessResumer {
 
     /// Write `data` out as a transcript of `kind` (`failed` says why that failed), and plan
     /// resuming it in `data.cwd`.
+    /// The harness to resume `session` with here: of its kind, at the home that holds its
+    /// transcript, else at the one the environment names.
+    async fn harness_of(&self, session: &SessionRow) -> Result<AnyHarness, NotResumable> {
+        let kind = session.handle.harness;
+        let harness = kind.harness().ok_or(NotResumable::Unsupported(harness_label(kind)))?;
+        Ok(self.machine.home_of(harness, session.handle.session.as_ref()).await)
+    }
+
     async fn write_out(
         &self,
         kind: HarnessKind,
@@ -601,7 +625,7 @@ impl HarnessResumer {
         session: &SessionRow,
     ) -> Result<(Resume, Option<Copy>), NotResumable> {
         let kind = session.handle.harness;
-        let harness = kind.harness().ok_or(NotResumable::Unsupported(harness_label(kind)))?;
+        let harness = self.harness_of(session).await?;
         let id = session.handle.session.as_ref();
         let template = self.templates.template(kind);
 
@@ -708,7 +732,7 @@ impl Resumer for HarnessResumer {
             Err(e) => Err(e),
         };
         let kind = session.handle.harness;
-        let harness = kind.harness().ok_or(NotResumable::Unsupported(harness_label(kind)))?;
+        let harness = self.harness_of(session).await?;
         let id = session.handle.session.as_ref();
         let analysis = source.analyse(&session.handle).await;
         let Some(analysis) = analysis.map_err(|e| NotResumable::CatchUp(format!("{e:#}")))? else {
@@ -799,7 +823,7 @@ impl Resumer for HarnessResumer {
     ) -> Result<Switched, NotResumable> {
         let fail = |why: String| NotResumable::Switch(why);
         let kind = session.handle.harness;
-        let harness = kind.harness().ok_or(NotResumable::Unsupported(harness_label(kind)))?;
+        let harness = self.harness_of(session).await?;
         let id = session.handle.session.as_ref();
         // The replace looks for an agent where the plan did, in the copy the plan read.
         let (resume, copy) = self.plan_here(session).await?;
@@ -894,7 +918,7 @@ impl Resumer for HarnessResumer {
         from: ForkFrom,
     ) -> Result<Forked, NotResumable> {
         let kind = session.handle.harness;
-        let harness = kind.harness().ok_or(NotResumable::Unsupported(harness_label(kind)))?;
+        let harness = self.harness_of(session).await?;
         let fail = |e: String| NotResumable::Fork(e);
         let restore = resolve_cwd(session.cwd.as_deref(), &self.context);
         // Restored as a resume would restore it (along its newest head, when it diverged), should
@@ -955,8 +979,7 @@ impl Resumer for HarnessResumer {
         head: Option<&SourceId>,
     ) -> Result<Continued, NotResumable> {
         let from_kind = session.handle.harness;
-        let from =
-            from_kind.harness().ok_or(NotResumable::Unsupported(harness_label(from_kind)))?;
+        let from = self.harness_of(session).await?;
         let into = target.harness().ok_or(NotResumable::Unsupported(harness_label(target)))?;
         let fail = |e: String| NotResumable::Continue(harness_label(target), e);
         if harness_arg(target).is_none() {

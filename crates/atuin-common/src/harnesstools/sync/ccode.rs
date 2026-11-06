@@ -52,19 +52,20 @@ use super::{
     check_segment, continuing_from, descends, jsonl_lines, kept_lines, modified, past,
     replace_jsonl, require_idle, resumes_from, switched_to, with_merged,
 };
-use crate::harnesstools::ccode::session::{CcodeMessage, default_root, locate, spawner_of};
+use crate::harnesstools::ccode::session::{CcodeMessage, locate, spawner_of};
 use crate::harnesstools::ccode::{Ccode, rehydrate};
 use crate::harnesstools::rehydrate::{RehydrateMessage, RehydrateSession};
 use crate::harnesstools::session::{Message, SessionId};
+use crate::path::PathBufExt as _;
 
 impl SessionSync for Ccode {
     async fn local_tip(&self, id: &str) -> Result<Option<LocalTip>, SyncError> {
-        let (root, id) = (default_root(), id.to_owned());
+        let (root, id) = (self.root(), id.to_owned());
         blocking(move || locate(&root, &id).map(|path| read_tip(&path)).transpose()).await
     }
 
     async fn is_live(&self, id: &str, _cwd: Option<&Path>) -> Liveness {
-        let (sessions, id) = (sessions_dir(), id.to_owned());
+        let (sessions, id) = (self.home().joined("sessions"), id.to_owned());
         tokio::task::spawn_blocking(move || {
             liveness(&sessions, &id, &Processes::here(), &pid_domain())
         })
@@ -98,11 +99,6 @@ impl SessionSync for Ccode {
         let (taken, backups) = (options.taken_ids.cloned(), backups.to_path_buf());
         blocking(move || replace_to(&id, &base, &branch, taken.as_ref(), &backups)).await
     }
-}
-
-/// `<config dir>/sessions`, beside the projects directory.
-fn sessions_dir() -> PathBuf {
-    default_root().with_file_name("sessions")
 }
 
 /// This process's pid domain, as Claude Code writes it on Linux (`SBo` in CC 2.1.284), else

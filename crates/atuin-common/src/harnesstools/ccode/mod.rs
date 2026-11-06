@@ -6,7 +6,7 @@ use super::resume::{self, CwdRequirement, ResumeError, ResumePlan, ResumeTarget}
 use super::{Harness, InstallHookError, json_hooks};
 use crate::dirs::home_dir;
 use crate::env::var_nonempty;
-use crate::path::PathBufExt as _;
+use crate::path::{AbsPath, PathBufExt as _};
 
 pub mod rehydrate;
 pub mod session;
@@ -17,12 +17,35 @@ pub(crate) fn config_dir() -> PathBuf {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Ccode;
+pub struct Ccode {
+    /// A config directory other than the one the environment names (`[[threads.homes]]`).
+    home: Option<&'static AbsPath>,
+}
 
 impl Ccode {
+    /// Claude Code with the config directory the environment names.
+    pub const DEFAULT: Self = Self { home: None };
+
     #[must_use]
     pub fn new() -> Self {
-        Self {}
+        Self::DEFAULT
+    }
+
+    /// Claude Code with the config directory `home`, `None` when the environment names it
+    /// already.
+    #[must_use]
+    pub fn at(home: &'static AbsPath) -> Option<Self> {
+        (home.as_path() != config_dir()).then_some(Self { home: Some(home) })
+    }
+
+    /// The config directory this reads and writes.
+    pub(crate) fn home(&self) -> PathBuf {
+        self.home.map_or_else(config_dir, |home| home.to_path_buf())
+    }
+
+    /// The projects directory, which holds the transcripts.
+    pub(crate) fn root(&self) -> PathBuf {
+        self.home().joined("projects")
     }
 }
 
@@ -38,7 +61,7 @@ impl Harness for Ccode {
     /// Install the hooks on the current active user's machine
     async fn install_hooks(&self) -> Result<PathBuf, InstallHookError> {
         // Claude Code reads hooks from its settings.json.
-        let config_path = config_dir().joined("settings.json");
+        let config_path = self.home().joined("settings.json");
         json_hooks::install(&config_path, "^Bash$", self.name()).await?;
         Ok(config_path)
     }
@@ -54,16 +77,21 @@ impl Harness for Ccode {
             ));
         }
         let args = ["--resume".to_owned(), target.id.clone()];
-        Ok(resume::plan(target, CwdRequirement::Preferred, "claude", args))
+        let mut plan = resume::plan(target, CwdRequirement::Preferred, "claude", args);
+        if let Some(home) = self.home {
+            let unset = home_dir().joined(".claude");
+            plan.env.push(resume::home_env("CLAUDE_CONFIG_DIR", home.as_path(), &unset)?);
+        }
+        Ok(plan)
     }
 
     async fn locate(&self, id: &str) -> Option<PathBuf> {
-        let (root, id) = (session::default_root(), id.to_owned());
+        let (root, id) = (self.root(), id.to_owned());
         resume::blocking(move || session::locate(&root, &id)).await
     }
 
     async fn rehydrate(&self, session: &RehydrateSession) -> Result<PathBuf, RehydrateError> {
-        rehydrate::rehydrate(session).await
+        rehydrate::rehydrate(self.root(), session).await
     }
 }
 

@@ -68,6 +68,9 @@ pub struct ResumePlan {
     pub cwd_requirement: CwdRequirement,
     /// The session's native transcript, when the target named one.
     pub native_path: Option<PathBuf>,
+    /// Environment variables to set (`Some`) or unset (`None`) for `program`: how a harness
+    /// with a home other than the environment's (`[[threads.homes]]`) is pointed at it.
+    pub env: Vec<(&'static str, Option<String>)>,
 }
 
 impl ResumePlan {
@@ -89,10 +92,23 @@ impl ResumePlan {
         Ok(self)
     }
 
-    /// The program and its arguments, quoted for the shell, without the `cd`.
+    /// The program and its arguments, quoted for the shell, without the `cd`: through `env` when
+    /// [`Self::env`] changes anything.
     #[must_use]
     pub fn command(&self) -> String {
-        let mut out = String::from(quote(&self.program));
+        let mut out = String::new();
+        if !self.env.is_empty() {
+            out.push_str("env ");
+            for (name, _) in self.env.iter().filter(|(_, value)| value.is_none()) {
+                out.push_str(&format!("-u {name} "));
+            }
+            for (name, value) in &self.env {
+                if let Some(value) = value {
+                    out.push_str(&format!("{name}={} ", quote(value)));
+                }
+            }
+        }
+        out.push_str(&quote(&self.program));
         for arg in &self.args {
             out.push(' ');
             out.push_str(&quote(arg));
@@ -237,7 +253,19 @@ pub(crate) fn plan(
         cwd: target.cwd.clone(),
         cwd_requirement: cwd,
         native_path: target.native_path.clone(),
+        env: Vec::new(),
     }
+}
+
+/// How `var` points a harness at `home`: unset when `home` is `default`, where the harness looks
+/// without it, else set to `home`.
+pub(crate) fn home_env(
+    var: &'static str,
+    home: &Path,
+    default: &Path,
+) -> Result<(&'static str, Option<String>), ResumeError> {
+    let value = (home != default).then(|| path_arg(home)).transpose()?;
+    Ok((var, value))
 }
 
 /// `path` as an argument, or `Err` if it is not UTF-8.
@@ -402,10 +430,29 @@ mod tests {
             cwd: Some(dir.clone()),
             cwd_requirement: CwdRequirement::Required,
             native_path: None,
+            env: Vec::new(),
         };
         let script = format!("{} && pwd", plan.render().unwrap());
         if let Some(got) = run_in(shell, &script) {
             assert_eq!(got, format!("it's|a\\b|$HOME|{}\n", dir.display()), "{shell}");
+        }
+    }
+
+    #[cfg(unix)]
+    /// What a rendered plan sets and unsets reaches its program, in each shell.
+    #[rstest]
+    fn shells_pass_a_rendered_plans_env(#[values("bash", "zsh", "fish")] shell: &str) {
+        let script = r#"printf '%s|%s' "$SET" "${GONE-unset}""#;
+        let mut plan =
+            plan(&ResumeTarget::new("s"), CwdRequirement::None, "sh", ["-c".into(), script.into()]);
+        plan.env = vec![("GONE", None), ("SET", Some("it's $x".into()))];
+        let export = if shell == "fish" {
+            "set -gx GONE here; "
+        } else {
+            "export GONE=here; "
+        };
+        if let Some(got) = run_in(shell, &format!("{export}{}", plan.render().unwrap())) {
+            assert_eq!(got, "it's $x|unset", "{shell}");
         }
     }
 
@@ -424,6 +471,18 @@ mod tests {
         let plan =
             plan(&target, CwdRequirement::Preferred, "claude", ["--resume".into(), "s1".into()]);
         assert_eq!(plan.render().unwrap(), "cd -- '/w/my proj' && claude --resume s1");
+    }
+
+    #[rstest]
+    fn render_runs_through_env_when_it_changes_any() {
+        let mut plan =
+            plan(&ResumeTarget::new("s1"), CwdRequirement::None, "claude", ["--resume".into()]);
+        plan.env.push(("CODEX_HOME", None));
+        plan.env.push(("CLAUDE_CONFIG_DIR", Some("/h/my claude".into())));
+        assert_eq!(
+            plan.render().unwrap(),
+            "env -u CODEX_HOME CLAUDE_CONFIG_DIR='/h/my claude' claude --resume"
+        );
     }
 
     #[rstest]

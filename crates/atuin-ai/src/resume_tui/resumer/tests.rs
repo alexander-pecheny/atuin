@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use atuin_client::ai_session::{HarnessKind, HarnessSession};
+use atuin_client::settings::HarnessHome;
+use atuin_common::env::MockEnv;
 use atuin_common::harnesstools::resume::CwdRequirement;
+use atuin_common::path::{AbsPath, AbsPathBuf};
 use parking_lot::Mutex;
 use rstest::{fixture, rstest};
 use tempfile::TempDir;
@@ -41,12 +44,18 @@ struct FakeMachine {
     replace_cwds: Arc<Mutex<Vec<Option<PathBuf>>>>,
     /// The copy as the last replace left it, read instead of `tip` once there is one.
     switched: Arc<Mutex<Option<LocalTip>>>,
+    /// The home every session is kept at, when not the environment's.
+    home: Option<&'static AbsPath>,
 }
 
 #[async_trait]
 impl Machine for FakeMachine {
     async fn locate(&self, _: AnyHarness, id: &str) -> Option<PathBuf> {
         self.found.get(id).cloned()
+    }
+
+    async fn home_of(&self, harness: AnyHarness, _: &str) -> AnyHarness {
+        self.home.and_then(|home| harness.at(home)).unwrap_or(harness)
     }
 
     async fn rehydrate(
@@ -267,6 +276,7 @@ fn shell_line_quotes_the_directory() {
         cwd: Some(PathBuf::from("/tmp/it's here")),
         cwd_requirement: CwdRequirement::Preferred,
         native_path: None,
+        env: Vec::new(),
     };
     assert_eq!(shell_line(&plan), r"cd -- '/tmp/it'\''s here' && claude --resume abc");
 }
@@ -825,6 +835,7 @@ fn the_program_to_check_is_relative_to_the_plans_directory() {
         cwd: cwd.map(PathBuf::from),
         cwd_requirement: CwdRequirement::Preferred,
         native_path: None,
+        env: Vec::new(),
     };
     let joined = Path::new("/w/proj").join("./bin/wrapper").to_string_lossy().into_owned();
     assert_eq!(program_to_check(&plan("./bin/wrapper", Some("/w/proj"))), joined);
@@ -1603,4 +1614,62 @@ async fn a_switched_copy_fast_forwards_as_its_branch_grows(dirs: Dirs) {
     };
     assert_eq!(status.as_deref(), Some("caught up: 1 message from @00000002"));
     assert_eq!(*machine.appended.lock(), ["e@d"]);
+}
+
+// --- homes --------------------------------------------------------------------------------------
+
+/// A Claude Code session kept in a `[[threads.homes]]` home is read there, and resumed with
+/// `CLAUDE_CONFIG_DIR` naming it.
+#[rstest]
+#[tokio::test]
+async fn a_session_in_an_added_home_resumes_there() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = MockEnv::install();
+    env.set("HOME", dir.path());
+    let personal = dir.path().join("personal");
+    let project = personal.join("projects").joined("-w");
+    std::fs::create_dir_all(&project).unwrap();
+    let transcript = project.join("s.jsonl");
+    let fixture = include_str!("../../../../atuin-common/tests/fixtures/ccode/session1.jsonl");
+    std::fs::write(&transcript, fixture).unwrap();
+    let path = AbsPathBuf::new(&personal).unwrap();
+    let machine = ThisMachine(Homes::new(&[HarnessHome {
+        harness: "claude-code".into(),
+        path,
+    }]));
+    let own = HarnessKind::ClaudeCode.harness().unwrap();
+
+    let harness = machine.home_of(own, "s").await;
+    let tip = machine.local_tip(harness, "s").await.unwrap().unwrap();
+    assert_eq!(tip.native_path, transcript);
+    let plan = harness.resume_plan(&ResumeTarget::new("s").with_native_path(transcript)).unwrap();
+    assert_eq!(plan.env, [("CLAUDE_CONFIG_DIR", Some(personal.to_str().unwrap().to_owned()))]);
+    let elsewhere = machine.home_of(own, "elsewhere").await;
+    assert!(elsewhere.resume_plan(&ResumeTarget::new("elsewhere")).unwrap().env.is_empty());
+}
+
+/// Catching a session up resumes it with the agent at the home its copy is kept in.
+#[rstest]
+#[tokio::test]
+async fn catching_up_resumes_at_the_sessions_home(dirs: Dirs) {
+    let env = MockEnv::install();
+    env.set("HOME", &dirs.elsewhere);
+    let home = AbsPathBuf::new(dirs.elsewhere.join("personal")).unwrap();
+    let home: &'static AbsPath = Box::leak(Box::new(home));
+    let mut machine = FakeMachine {
+        home: Some(home),
+        tip: Some(fake::local_tip(&["a", "b", "c", "d"], Some("d"))),
+        ..FakeMachine::default()
+    };
+    machine.found.insert("s".to_owned(), PathBuf::from("/t/s.jsonl"));
+    let mut session = row(HarnessKind::ClaudeCode, "s", &dirs.elsewhere, false);
+    session.handle = fake::synced_handle();
+    let source = fake::FakeSource::from_rows(vec![session.clone()])
+        .with_synced(&session.handle, fake::synced_rows(false));
+
+    let caught = resumer(&dirs, &machine).catch_up(&source, &session, None).await.unwrap();
+    let CatchUp::Ready { plan, .. } = caught else {
+        panic!("a copy at the head resumes as it is");
+    };
+    assert_eq!(plan.env, [("CLAUDE_CONFIG_DIR", Some(home.to_str().unwrap().to_owned()))]);
 }

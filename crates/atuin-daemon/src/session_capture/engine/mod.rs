@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use atuin_client::ai_session::{
-    Appended, DbError, HarnessKind, HarnessSession, Message, NativeSessionId, Session, SourceId,
+    Appended, DbError, HarnessKind, HarnessSession, Homes, Message, NativeSessionId, Session,
+    SourceId,
 };
-use atuin_common::harnesstools::AnyHarness;
 use atuin_common::harnesstools::session::any::{
     AnySessions, ListenerExt as _, ObservableExt as _, SessionsExt as _,
 };
@@ -52,14 +52,14 @@ impl SessionCaptureEngine {
     /// Capture every harness's sessions from `since` on: one with nothing stored yet only once
     /// it changes after, then whole. The rest, sessions nobody touches since, are history, which
     /// is `atuin threads import`'s to bring in.
-    pub fn spawn(sink: &Arc<Sink>, pool: &BlockingPool, since: SystemTime) -> Self {
+    pub fn spawn(sink: &Arc<Sink>, pool: &BlockingPool, homes: &Homes, since: SystemTime) -> Self {
         let mut listeners = Vec::new();
 
-        for harness in AnyHarness::all() {
+        for harness in homes.all() {
             let Some(sessions) = harness.sessions(pool) else {
                 continue;
             };
-            let kind = HarnessKind::from(harness);
+            let kind = HarnessKind::from(&harness);
             let sink = sink.clone();
             let listen = move || listen(kind, sink.clone(), sessions.clone(), since);
             listeners.push(tokio::spawn(supervise(kind, listen, LISTENER_RETRY_START)));

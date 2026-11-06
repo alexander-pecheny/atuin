@@ -33,6 +33,29 @@ atuin threads import
 That imports every session the agents have on this machine (or just one
 agent's, with `--harness`), and running it again imports only what's new.
 
+### Agents with more than one home
+
+Claude Code and Codex keep their sessions in a home directory, which
+`CLAUDE_CONFIG_DIR` and `CODEX_HOME` move. If you run either with more than one
+home, such as separate work and personal accounts, list the homes the
+environment doesn't name under `[[threads.homes]]`:
+
+```toml
+[[threads.homes]]
+harness = "claude-code"
+path = "~/.claude-personal"
+```
+
+The daemon captures and imports from each of them as well as from the agent's
+own home. It reads the list when it starts, so run `atuin daemon restart` after
+changing it. `atuin threads resume` resumes a thread in the home that holds it,
+starting the agent with `CLAUDE_CONFIG_DIR` or `CODEX_HOME` set to that home.
+
+A home that the environment already names is skipped, so you can list every
+home and use the same settings whichever one a shell starts with. Two homes
+holding copies of the same session, one copied from the other, capture it as a
+single thread.
+
 ### Amp
 
 Amp keeps its threads on its servers, not on disk, so a plugin hands them to

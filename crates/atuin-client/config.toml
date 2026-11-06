@@ -380,6 +380,13 @@ enter_accept = true
 # opencode = "opencode --session {id}"
 # pi = "pi --session {id}"
 
+## More home directories of Claude Code (CLAUDE_CONFIG_DIR) or Codex (CODEX_HOME) to
+## capture threads from and resume them in, besides the one the environment names.
+## One entry per directory. The daemon reads them when it starts.
+# [[threads.homes]]
+# harness = "claude-code"
+# path = "~/.claude-personal"
+
 [tmux]
 ## Enable using atuin with tmux popup (requires tmux >= 3.2)
 ## When enabled and running inside tmux, Atuin will use a popup window for interactive search.

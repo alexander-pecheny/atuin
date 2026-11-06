@@ -51,7 +51,7 @@ use output::OutputCaptureConfig;
 pub use output::{CaptureLimits, CommandFilter, OutputCapture};
 pub use security::Security;
 pub use shells::Shells;
-pub use threads::{AiSessionFilterMode, AiSessionResume, Threads};
+pub use threads::{AiSessionFilterMode, AiSessionResume, HarnessHome, Threads};
 
 /// Default sync address for Atuin's hosted service, parsed once.
 pub static DEFAULT_SYNC_URL: LazyLock<Url> =

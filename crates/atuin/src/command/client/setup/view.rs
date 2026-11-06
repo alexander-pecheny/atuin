@@ -848,7 +848,10 @@ mod tests {
             history: Some(("zsh", 48210)),
             imported: 0,
             threads_here: 0,
-            agents: vec![(AnyHarness::ClaudeCode(Ccode), 300), (AnyHarness::Codex(Codex), 53)],
+            agents: vec![
+                (AnyHarness::ClaudeCode(Ccode::DEFAULT), 300),
+                (AnyHarness::Codex(Codex::DEFAULT), 53),
+            ],
             hooked: false,
             ctrl_r: true,
             up_arrow: true,

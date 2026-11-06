@@ -25,8 +25,8 @@ use crate::harnesstools::{ccode, codex, copilot, grok, kiro, opencode, pi};
 use crate::path::PathBufExt as _;
 use crate::sync::BlockingPool;
 
-pub const CLAUDE: AnyHarness = AnyHarness::ClaudeCode(Ccode);
-pub const CODEX: AnyHarness = AnyHarness::Codex(Codex);
+pub const CLAUDE: AnyHarness = AnyHarness::ClaudeCode(Ccode::DEFAULT);
+pub const CODEX: AnyHarness = AnyHarness::Codex(Codex::DEFAULT);
 pub const COPILOT: AnyHarness = AnyHarness::Copilot(Copilot);
 pub const GROK: AnyHarness = AnyHarness::Grok(Grok);
 pub const KIRO: AnyHarness = AnyHarness::Kiro(Kiro);

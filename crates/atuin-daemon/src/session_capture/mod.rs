@@ -16,8 +16,8 @@ use std::time::{Duration, SystemTime};
 
 use atuin_client::ai_session::{
     AiSessionDatabase, AiSessionStore, Appended, AtuinSessionId, BuildError, CaptureMark, DbError,
-    HarnessKind, HarnessSession, Message, NewRow, PreparedMessage, PushError, ReprojectProgress,
-    SearchTerms, Session, SessionFilter, SessionMatch,
+    HarnessKind, HarnessSession, Homes, Message, NewRow, PreparedMessage, PushError,
+    ReprojectProgress, SearchTerms, Session, SessionFilter, SessionMatch,
 };
 use atuin_client::record::decode::map_parallel;
 use atuin_client::record::sqlite_store::SqliteStore;
@@ -849,6 +849,8 @@ pub struct AiHarnessSessionCapture {
     sink: Arc<Sink>,
     /// Runs the harness session file reads of capture and import.
     pool: BlockingPool,
+    /// The harnesses' homes capture and import read.
+    homes: Homes,
     /// Written by the coordinator only (see [`recovery`]).
     state: watch::Receiver<StoreState>,
     /// The coordinator's mailbox, for rebuilds. None without a persistent store.
@@ -881,12 +883,17 @@ impl AiHarnessSessionCapture {
     /// projection of downloaded records (see [`Recovery`]), so one reprojection runs at a time.
     /// Failed recovery leaves existing sessions readable but keeps both off until restart.
     #[must_use]
+    #[cfg_attr(
+        feature = "octavo",
+        expect(clippy::too_many_arguments, reason = "the capture settings, and the octavo hook")
+    )]
     pub fn open(
         records: AiSessionStore,
         sidecar: AiSessionDatabase,
         capture: bool,
         tools: ToolCapture,
         policy: CapturePolicy,
+        homes: Homes,
         pool: BlockingPool,
         #[cfg(feature = "octavo")] octavo: Arc<Octavo>,
     ) -> Self {
@@ -896,6 +903,7 @@ impl AiHarnessSessionCapture {
             capture,
             tools,
             policy,
+            homes,
             pool,
             #[cfg(feature = "octavo")]
             octavo,
@@ -905,7 +913,7 @@ impl AiHarnessSessionCapture {
     }
 
     #[cfg_attr(
-        all(test, feature = "octavo"),
+        any(test, feature = "octavo"),
         expect(clippy::too_many_arguments, reason = "`open`'s arguments, and the test hooks")
     )]
     fn open_with(
@@ -914,6 +922,7 @@ impl AiHarnessSessionCapture {
         capture: bool,
         tools: ToolCapture,
         policy: CapturePolicy,
+        homes: Homes,
         pool: BlockingPool,
         #[cfg(feature = "octavo")] octavo: Arc<Octavo>,
         #[cfg(test)] hooks: Option<Arc<dyn hooks::Hooks>>,
@@ -956,6 +965,7 @@ impl AiHarnessSessionCapture {
         let capturing = tokio::spawn({
             let sink = sink.clone();
             let pool = pool.clone();
+            let homes = homes.clone();
             let mut state = state.clone();
             async move {
                 if state.wait_for(|state| *state == StoreState::Ready).await.is_ok() {
@@ -965,7 +975,7 @@ impl AiHarnessSessionCapture {
                     }
                     follow(enabled, || {
                         let since = started.take().unwrap_or_else(SystemTime::now);
-                        SessionCaptureEngine::spawn(&sink, &pool, since)
+                        SessionCaptureEngine::spawn(&sink, &pool, &homes, since)
                     })
                     .await;
                 }
@@ -975,6 +985,7 @@ impl AiHarnessSessionCapture {
         Self {
             sink,
             pool,
+            homes,
             state,
             coordinator: Some(coordinator),
             progress,
@@ -1011,6 +1022,7 @@ impl AiHarnessSessionCapture {
             sink: Arc::new(Sink::with_state(records, sidecar, ToolCapture::Names, state.clone())),
             // Never runs anything: without a persistent store there is no capture or import.
             pool: BlockingPool::new(NonZeroUsize::MIN),
+            homes: Homes::default(),
             state,
             // No coordinator: nothing to rebuild, and nothing sets the state a test drives but
             // the test.
@@ -1160,9 +1172,10 @@ impl AiHarnessSessionCapture {
         let state = self.state.clone();
         let sink = self.sink.clone();
         let pool = self.pool.clone();
+        let homes = self.homes.clone();
         async move {
             if Self::wait_ready(state).await {
-                SessionImporter::new(sink, pool).run(harness).right_stream()
+                SessionImporter::new(sink, pool, homes).run(harness).right_stream()
             } else {
                 futures::stream::once(async {
                     ImportProgress::Finished {
@@ -2121,6 +2134,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2140,6 +2154,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2186,6 +2201,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2208,6 +2224,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2245,6 +2262,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2300,6 +2318,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2409,6 +2428,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2465,6 +2485,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2506,6 +2527,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2594,6 +2616,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2645,6 +2668,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2691,6 +2715,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2726,6 +2751,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2773,6 +2799,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -2925,6 +2952,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -3030,6 +3058,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -3098,6 +3127,7 @@ mod tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -3124,6 +3154,7 @@ mod tests {
                 false,
                 ToolCapture::Names,
                 CapturePolicy::default(),
+                Homes::default(),
                 BlockingPool::new(NonZeroUsize::MIN),
                 #[cfg(feature = "octavo")]
                 Arc::new(Octavo::nop()),
@@ -3749,6 +3780,7 @@ mod pipeline_tests {
             false,
             ToolCapture::Names,
             CapturePolicy::default(),
+            Homes::default(),
             BlockingPool::new(NonZeroUsize::MIN),
             #[cfg(feature = "octavo")]
             Arc::new(Octavo::nop()),
@@ -4183,7 +4215,8 @@ mod pipeline_tests {
         // The mock is thread-local. `rehydrate` reads `CODEX_HOME` before it first yields.
         let env = atuin_common::env::MockEnv::install();
         env.set("CODEX_HOME", home);
-        let written = atuin_common::harnesstools::codex::rehydrate::rehydrate(session).await;
+        let codex = atuin_common::harnesstools::codex::Codex::new();
+        let written = atuin_common::harnesstools::Harness::rehydrate(&codex, session).await;
         drop(env);
         let path = written.unwrap();
         // Make sure we wrote to `CODEX_HOME` and not the real `~/.codex`.

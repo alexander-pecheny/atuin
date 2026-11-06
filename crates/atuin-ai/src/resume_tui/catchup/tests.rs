@@ -251,6 +251,7 @@ async fn a_choice_says_why(#[case] why: Why, #[case] want: &str) {
             cwd: None,
             cwd_requirement: atuin_common::harnesstools::resume::CwdRequirement::Preferred,
             native_path: None,
+            env: Vec::new(),
         },
         branches: branches(&analysis, None, fake::THIS_HOST_ID),
         chosen: 0,

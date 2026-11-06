@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use atuin_client::ai_session::{Appended, HarnessKind, NativeSessionId};
-use atuin_common::harnesstools::AnyHarness;
+use atuin_client::ai_session::{Appended, HarnessKind, Homes, NativeSessionId};
 use atuin_common::harnesstools::session::any::{
     AnySession, AnySessions, ObservableExt as _, SessionExt as _, SessionsExt as _,
 };
@@ -41,14 +40,16 @@ const BATCH: usize = 1024;
 pub struct SessionImporter {
     sink: Arc<Sink>,
     pool: BlockingPool,
+    homes: Homes,
     concurrency: usize,
 }
 
 impl SessionImporter {
-    pub fn new(sink: Arc<Sink>, pool: BlockingPool) -> Self {
+    pub fn new(sink: Arc<Sink>, pool: BlockingPool, homes: Homes) -> Self {
         Self {
             sink,
             pool,
+            homes,
             concurrency: 8,
         }
     }
@@ -62,8 +63,8 @@ impl SessionImporter {
             let mut imported = 0u64;
             let mut skipped = 0u64;
             let mut failed = 0u64;
-            for harness in AnyHarness::all() {
-                let kind = HarnessKind::from(harness);
+            for harness in self.homes.all() {
+                let kind = HarnessKind::from(&harness);
                 if filter.is_some_and(|want| want != kind) {
                     continue;
                 }
@@ -310,7 +311,7 @@ mod tests {
             session: NativeSessionId::from("s1".to_owned()),
         };
 
-        let first: Vec<_> = SessionImporter::new(sink.clone(), pool())
+        let first: Vec<_> = SessionImporter::new(sink.clone(), pool(), Homes::default())
             .harness(HarnessKind::Pi, pi_sessions(root.path()))
             .collect()
             .await;
@@ -320,7 +321,7 @@ mod tests {
         let after_first = sink.sidecar.get_session(&handle).await.unwrap().unwrap().message_count;
         assert_eq!(after_first, 2);
 
-        let second: Vec<_> = SessionImporter::new(sink.clone(), pool())
+        let second: Vec<_> = SessionImporter::new(sink.clone(), pool(), Homes::default())
             .harness(HarnessKind::Pi, pi_sessions(root.path()))
             .collect()
             .await;
@@ -340,7 +341,7 @@ mod tests {
         let sink =
             Arc::new(Sink::new(mem_store().await, AiSessionDatabase::in_memory().await.unwrap()));
         let import = async || -> Vec<_> {
-            SessionImporter::new(sink.clone(), pool())
+            SessionImporter::new(sink.clone(), pool(), Homes::default())
                 .harness(HarnessKind::Pi, pi_sessions(root.path()))
                 .collect()
                 .await
@@ -393,7 +394,7 @@ mod tests {
         let mut sink = Sink::new(mem_store().await, AiSessionDatabase::in_memory().await.unwrap());
         sink.hooks = Some(pushes.clone());
 
-        let counts: Vec<_> = SessionImporter::new(Arc::new(sink), pool())
+        let counts: Vec<_> = SessionImporter::new(Arc::new(sink), pool(), Homes::default())
             .harness(HarnessKind::Pi, pi_sessions(root.path()))
             .filter_map(async |event| match event {
                 ImportProgress::Session {
@@ -431,7 +432,7 @@ mod tests {
 
         let sink =
             Arc::new(Sink::new(mem_store().await, AiSessionDatabase::in_memory().await.unwrap()));
-        let _: Vec<_> = SessionImporter::new(sink.clone(), pool())
+        let _: Vec<_> = SessionImporter::new(sink.clone(), pool(), Homes::default())
             .harness(HarnessKind::Pi, pi_sessions(root.path()))
             .collect()
             .await;
@@ -471,7 +472,7 @@ mod tests {
         let sessions = AnySessions::from(
             CopilotSessions::builder().root(root.path().to_path_buf()).pool(pool()).build(),
         );
-        let progress: Vec<_> = SessionImporter::new(sink.clone(), pool())
+        let progress: Vec<_> = SessionImporter::new(sink.clone(), pool(), Homes::default())
             .harness(HarnessKind::Copilot, sessions)
             .collect()
             .await;
@@ -526,7 +527,7 @@ mod tests {
         let sessions = AnySessions::from(
             KiroSessions::builder().root(root.path().to_path_buf()).pool(pool()).build(),
         );
-        let progress: Vec<_> = SessionImporter::new(sink.clone(), pool())
+        let progress: Vec<_> = SessionImporter::new(sink.clone(), pool(), Homes::default())
             .harness(HarnessKind::Kiro, sessions)
             .collect()
             .await;
@@ -573,7 +574,7 @@ mod tests {
         let sessions = AnySessions::from(
             KiroSessions::builder().root(root.path().to_path_buf()).pool(pool()).build(),
         );
-        let progress: Vec<_> = SessionImporter::new(sink.clone(), pool())
+        let progress: Vec<_> = SessionImporter::new(sink.clone(), pool(), Homes::default())
             .harness(HarnessKind::Kiro, sessions)
             .collect()
             .await;
@@ -620,7 +621,7 @@ mod tests {
 
         let sink =
             Arc::new(Sink::new(mem_store().await, AiSessionDatabase::in_memory().await.unwrap()));
-        let events: Vec<_> = SessionImporter::new(sink, pool())
+        let events: Vec<_> = SessionImporter::new(sink, pool(), Homes::default())
             .harness(HarnessKind::Pi, pi_sessions(root.path()))
             .collect()
             .await;

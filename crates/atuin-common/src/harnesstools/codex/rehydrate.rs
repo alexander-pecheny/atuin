@@ -98,8 +98,8 @@ const COMPACTION_PREAMBLE: &str =
      Here is the summary produced by the other language model, use the information in this \
      summary to assist with your own analysis:\n";
 
-/// Write `session` as a Codex rollout in Codex's own sessions directory (`$CODEX_HOME/sessions`,
-/// else `~/.codex/sessions`, the one `locate` searches), under
+/// Write `session` as a Codex rollout in the sessions directory `root` of Codex home `home` (the
+/// one `locate` searches), under
 /// `<yyyy>/<mm>/<dd>/rollout-<yyyy-mm-ddThh-mm-ss>-<id>.jsonl` from its start (UTC), and hand back
 /// its path. `codex resume <id>` finds it from any directory.
 ///
@@ -113,13 +113,6 @@ const COMPACTION_PREAMBLE: &str =
 /// indexed it itself meanwhile (it is visible from the moment it is written): a stale file is
 /// better than a thread whose rollout is gone. A later restore finds that rollout and points the
 /// index at it again.
-pub async fn rehydrate(session: &RehydrateSession) -> Result<PathBuf, RehydrateError> {
-    let root = session::default_root();
-    let home = root.parent().map(Path::to_path_buf).ok_or(RehydrateError::NoDataDir)?;
-    rehydrate_into(&root, &home, session).await
-}
-
-/// [`rehydrate`] under the sessions directory `root` of Codex home `home`.
 pub(crate) async fn rehydrate_into(
     root: &Path,
     home: &Path,

@@ -38,6 +38,7 @@ use sync::{
     AppendOptions, AppendOutcome, Liveness, LocalTip, ReplaceOutcome, SessionSync, SyncError,
 };
 
+use crate::path::AbsPath;
 use crate::sync::BlockingPool;
 
 /// Defines a generic harness trait that all implementations need to implement.
@@ -159,13 +160,31 @@ impl AnyHarness {
             })
     }
 
+    /// Whether [`Self::at`] can point this harness at another home directory.
+    #[must_use]
+    pub fn takes_home(self) -> bool {
+        matches!(self, Self::ClaudeCode(_) | Self::Codex(_))
+    }
+
+    /// This harness with the home directory `home` (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) in place
+    /// of the one its environment names: `None` when that is `home`, or the harness has none
+    /// ([`Self::takes_home`]).
+    #[must_use]
+    pub fn at(self, home: &'static AbsPath) -> Option<Self> {
+        match self {
+            Self::ClaudeCode(_) => Ccode::at(home).map(Self::ClaudeCode),
+            Self::Codex(_) => Codex::at(home).map(Self::Codex),
+            _ => None,
+        }
+    }
+
     /// Every known harness.
     #[must_use]
     pub fn all() -> &'static [Self] {
         &[
             Self::Amp(Amp),
-            Self::ClaudeCode(Ccode),
-            Self::Codex(Codex),
+            Self::ClaudeCode(Ccode::DEFAULT),
+            Self::Codex(Codex::DEFAULT),
             Self::Copilot(Copilot),
             Self::Grok(Grok),
             Self::Kiro(Kiro),
@@ -173,5 +192,42 @@ impl AnyHarness {
             Self::Pi(Pi::PI),
             Self::Pi(Pi::OMP),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+    use crate::env::MockEnv;
+    use crate::path::AbsPathBuf;
+
+    /// A harness at another home resumes with its variable naming that home, and at the home it
+    /// uses without the variable with the variable unset; at the home its environment names it
+    /// is the harness as it was.
+    #[rstest]
+    #[case::claude_elsewhere(Ccode::DEFAULT.into(), "CLAUDE_CONFIG_DIR", "personal", true)]
+    #[case::claude_unset(Ccode::DEFAULT.into(), "CLAUDE_CONFIG_DIR", ".claude", false)]
+    #[case::codex_elsewhere(Codex::DEFAULT.into(), "CODEX_HOME", "personal", true)]
+    #[case::codex_unset(Codex::DEFAULT.into(), "CODEX_HOME", ".codex", false)]
+    fn a_harness_at_another_home_resumes_there(
+        #[case] harness: AnyHarness,
+        #[case] var: &'static str,
+        #[case] home: &str,
+        #[case] set: bool,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let env = MockEnv::install();
+        env.set("HOME", dir.path());
+        env.set(var, dir.path().join("work"));
+        let at = |name: &str| -> &'static AbsPath {
+            Box::leak(Box::new(AbsPathBuf::new(dir.path().join(name)).unwrap()))
+        };
+        assert!(harness.at(at("work")).is_none());
+
+        let plan = harness.at(at(home)).unwrap().resume_plan(&ResumeTarget::new("s1")).unwrap();
+        let value = set.then(|| dir.path().join(home).to_str().unwrap().to_owned());
+        assert_eq!(plan.env, [(var, value)]);
     }
 }

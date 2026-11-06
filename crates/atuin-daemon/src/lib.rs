@@ -153,6 +153,7 @@ pub async fn boot(
                 settings.threads.capture,
                 session_capture::ToolCapture::from_setting(settings.threads.capture_tools),
                 session_capture::CapturePolicy::from_settings(&settings),
+                atuin_client::ai_session::Homes::new(&settings.threads.homes),
                 blocking_pool.clone(),
                 #[cfg(feature = "octavo")]
                 octavo.clone(),

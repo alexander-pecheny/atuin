@@ -112,7 +112,7 @@ impl Observable for Ccode {
     type Sessions = CcodeSessions;
 
     fn sessions(&self, pool: BlockingPool) -> CcodeSessions {
-        CcodeSessions::builder().pool(pool).build()
+        CcodeSessions::builder().root(self.root()).pool(pool).build()
     }
 }
 

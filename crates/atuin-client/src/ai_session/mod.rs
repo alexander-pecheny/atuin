@@ -8,6 +8,8 @@ mod store;
 pub use store::*;
 mod database;
 pub use database::*;
+mod homes;
+pub use homes::Homes;
 
 /// The sidecar's name before threads; [`migrate_sidecar_name`] moves it.
 const LEGACY_SIDECAR: &str = "ai_session_sidecar.db";

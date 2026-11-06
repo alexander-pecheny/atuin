@@ -51,7 +51,7 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::macros::format_description;
 
-use super::session::{default_root, locate};
+use super::session::locate;
 use crate::harnesstools::rehydrate::{
     RehydrateError, RehydrateMessage, RehydrateSession, UNCAPTURED_OUTPUT, break_line_cycles,
     merge_uncaptured_runs, on_parent_cycles, record_merged,
@@ -66,13 +66,15 @@ use crate::path::PathBufExt as _;
 /// (`Kne` in CC 2.1.283).
 const MAX_PROJECT_NAME: usize = 200;
 
-/// Write `session` under Claude Code's projects directory (`$CLAUDE_CONFIG_DIR/projects`, else
-/// `~/.claude/projects`, where [`Harness::locate`] looks), in the project of the directory it
-/// resumes in.
+/// Write `session` under the projects directory `root` (where [`Harness::locate`] looks), in
+/// the project of the directory it resumes in.
 ///
 /// [`Harness::locate`]: crate::harnesstools::Harness::locate
-pub async fn rehydrate(session: &RehydrateSession) -> Result<PathBuf, RehydrateError> {
-    let (root, session) = (default_root(), session.clone());
+pub async fn rehydrate(
+    root: PathBuf,
+    session: &RehydrateSession,
+) -> Result<PathBuf, RehydrateError> {
+    let session = session.clone();
     tokio::task::spawn_blocking(move || rehydrate_into(&root, &session))
         .await
         .map_err(|e| RehydrateError::Other(e.to_string()))?

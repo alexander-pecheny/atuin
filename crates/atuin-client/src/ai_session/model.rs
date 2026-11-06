@@ -62,8 +62,8 @@ impl HarnessKind {
         use atuin_common::harnesstools::{amp, ccode, codex, copilot, grok, kiro, opencode, pi};
         match self {
             Self::Amp => Some(AnyHarness::Amp(amp::Amp)),
-            Self::ClaudeCode => Some(AnyHarness::ClaudeCode(ccode::Ccode)),
-            Self::Codex => Some(AnyHarness::Codex(codex::Codex)),
+            Self::ClaudeCode => Some(AnyHarness::ClaudeCode(ccode::Ccode::DEFAULT)),
+            Self::Codex => Some(AnyHarness::Codex(codex::Codex::DEFAULT)),
             Self::Copilot => Some(AnyHarness::Copilot(copilot::Copilot)),
             Self::Grok => Some(AnyHarness::Grok(grok::Grok)),
             Self::Kiro => Some(AnyHarness::Kiro(kiro::Kiro)),

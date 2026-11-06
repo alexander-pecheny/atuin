@@ -58,12 +58,11 @@ use crate::sync::BlockingPool;
 
 impl SessionSync for Codex {
     async fn local_tip(&self, id: &str) -> Result<Option<LocalTip>, SyncError> {
-        local_tip_in(&crate::harnesstools::codex::home(), id).await
+        local_tip_in(&self.home(), id).await
     }
 
     async fn is_live(&self, id: &str, cwd: Option<&Path>) -> Liveness {
-        let (home, id, cwd) =
-            (crate::harnesstools::codex::home(), id.to_owned(), cwd.map(Path::to_path_buf));
+        let (home, id, cwd) = (self.home(), id.to_owned(), cwd.map(Path::to_path_buf));
         blocking_liveness(move || {
             let thread = resume_id(&id);
             let newest = is_plain_name(thread)
@@ -86,7 +85,7 @@ impl SessionSync for Codex {
         lines: &[RehydrateMessage],
         options: &AppendOptions<'_>,
     ) -> Result<AppendOutcome, SyncError> {
-        let (home, thread) = (crate::harnesstools::codex::home(), resume_id(id).to_owned());
+        let (home, thread) = (self.home(), resume_id(id).to_owned());
         let seen = appending(base, &thread, options.cwd);
         let (at, of) = (home.clone(), id.to_owned());
         require_idle(
@@ -104,7 +103,7 @@ impl SessionSync for Codex {
         options: &AppendOptions<'_>,
         backups: &Path,
     ) -> Result<ReplaceOutcome, SyncError> {
-        let (home, thread) = (crate::harnesstools::codex::home(), resume_id(id).to_owned());
+        let (home, thread) = (self.home(), resume_id(id).to_owned());
         let seen = appending(base, &thread, options.cwd);
         let (at, of) = (home.clone(), id.to_owned());
         require_idle(

@@ -1225,7 +1225,10 @@ mod tests {
             history: Some(("zsh", 48210)),
             imported: 0,
             threads_here: 0,
-            agents: vec![(AnyHarness::ClaudeCode(atuin_common::harnesstools::ccode::Ccode), 353)],
+            agents: vec![(
+                AnyHarness::ClaudeCode(atuin_common::harnesstools::ccode::Ccode::DEFAULT),
+                353,
+            )],
             hooked: false,
             ctrl_r: true,
             up_arrow: true,

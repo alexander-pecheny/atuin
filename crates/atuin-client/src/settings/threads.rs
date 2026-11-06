@@ -7,9 +7,12 @@
 //! `max_preview_height`, `enter_accept`, `keymap_mode`, `theme`) is read from the top-level
 //! settings, so the picker matches the history search without configuring it twice.
 
+use atuin_common::path::{AbsPathBuf, RelativeTo};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 
+use super::ConfigDir;
 use crate::ai_session::HarnessKind;
 
 /// Which threads the picker shows, cycled with ctrl-r in this order (see [`Self::CYCLE`]).
@@ -135,6 +138,21 @@ pub struct Threads {
 
     /// Per-harness resume command templates.
     pub resume: AiSessionResume,
+
+    /// Home directories of Claude Code and Codex to capture and resume threads in, besides the
+    /// one each one's environment names.
+    pub homes: Vec<HarnessHome>,
+}
+
+/// `[[threads.homes]]`: another home directory of one harness, as `CLAUDE_CONFIG_DIR` or
+/// `CODEX_HOME` would name it.
+#[serde_as]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct HarnessHome {
+    /// The harness, by the name `atuin threads` shows (`claude-code`, `codex`).
+    pub harness: String,
+    #[serde_as(as = "RelativeTo<ConfigDir>")]
+    pub path: AbsPathBuf,
 }
 
 impl Default for Threads {
@@ -147,6 +165,7 @@ impl Default for Threads {
             resume_chooser: true,
             mouse: None,
             resume: AiSessionResume::default(),
+            homes: Vec::new(),
         }
     }
 }
@@ -161,6 +180,23 @@ mod tests {
     fn empty_table_uses_defaults() {
         let parsed: Threads = toml::from_str("").unwrap();
         assert_eq!(parsed, Threads::default());
+    }
+
+    /// A home's path may start with `~`, as the other path settings may.
+    #[rstest]
+    fn a_homes_path_expands_the_home_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = atuin_common::env::MockEnv::install();
+        env.set("HOME", dir.path());
+        let parsed: Threads = toml::from_str(
+            r#"
+            [[homes]]
+            harness = "claude-code"
+            path = "~/.claude-personal"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(parsed.homes[0].path, dir.path().join(".claude-personal"));
     }
 
     #[rstest]

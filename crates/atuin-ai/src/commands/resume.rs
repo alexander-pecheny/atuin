@@ -780,6 +780,12 @@ fn exec(plan: &ResumePlan) -> Result<()> {
     }
     let mut command = std::process::Command::new(program);
     command.args(&plan.args);
+    for (name, value) in &plan.env {
+        match value {
+            Some(value) => command.env(name, value),
+            None => command.env_remove(name),
+        };
+    }
     if let Some(cwd) = &plan.cwd {
         // Keep $PWD in step, so harnesses that read it see the session's directory.
         command.env("PWD", cwd);
@@ -1081,6 +1087,7 @@ mod tests {
             cwd: None,
             cwd_requirement: atuin_common::harnesstools::resume::CwdRequirement::Preferred,
             native_path: None,
+            env: Vec::new(),
         };
         match printable_line(&plan) {
             Ok(line) => {
